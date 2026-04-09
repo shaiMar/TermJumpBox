@@ -33,6 +33,8 @@ Configuration lives under **`~/.config/ssh-term/`**:
 
 Use **Add folder…** / **Add server…** with a row selected to create a subfolder or server inside that folder (or choose **Folder** in the server dialog). A folder must be empty (no servers, no subfolders) before you delete it.
 
+**Right-click** the tree for the same actions in a context menu: on empty space you get **New folder** and **Add server** at the root (plus **SSH keys…**). On a folder or server row you get connect / edit / duplicate / delete and folder creation options appropriate to that row.
+
 Passwords are stored with a **fixed in-app obfuscation** (XOR + base64, prefix `enc1:`). That is not strong encryption; anyone with this repo can decode them. It only reduces casual exposure in the JSON file.
 
 ## SSH keys vs passwords

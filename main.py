@@ -8,7 +8,7 @@ import sys
 import uuid
 from dataclasses import replace
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QMenu,
     QPushButton,
     QRadioButton,
     QTableWidget,
@@ -606,6 +607,8 @@ class MainWindow(QMainWindow):
             2, QHeaderView.ResizeMode.ResizeToContents
         )
         self._tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._tree_context_menu)
         self._tree.itemDoubleClicked.connect(self._on_tree_double_click)
         QShortcut(QKeySequence(Qt.Key.Key_Return), self._tree, self._connect_selected)
         QShortcut(QKeySequence(Qt.Key.Key_Enter), self._tree, self._connect_selected)
@@ -621,6 +624,59 @@ class MainWindow(QMainWindow):
 
     def _open_keys(self) -> None:
         KeysManagerDialog(self, self).exec()
+
+    def _tree_context_menu(self, pos: QPoint) -> None:
+        item = self._tree.itemAt(pos)
+        menu = QMenu(self)
+        gpos = self._tree.viewport().mapToGlobal(pos)
+
+        def add_keys() -> None:
+            menu.addSeparator()
+            menu.addAction("SSH keys…", self._open_keys)
+
+        if item is None:
+            menu.addAction("New folder…", lambda: self._add_folder_at_parent(""))
+            menu.addAction("Add server…", lambda: self._add_server_at_folder(""))
+            add_keys()
+            menu.exec(gpos)
+            return
+
+        self._tree.setCurrentItem(item)
+        row = item.data(0, MainWindow._TREE_ROLE)
+        if not row or not isinstance(row, (list, tuple)) or len(row) != 2:
+            menu.addAction("New folder…", lambda: self._add_folder_at_parent(""))
+            menu.addAction("Add server…", lambda: self._add_server_at_folder(""))
+            add_keys()
+            menu.exec(gpos)
+            return
+
+        kind, iid = row[0], row[1]
+        if kind == "folder":
+            menu.addAction("New subfolder…", lambda: self._add_folder_at_parent(iid))
+            menu.addAction("Add server…", lambda: self._add_server_at_folder(iid))
+            menu.addSeparator()
+            menu.addAction("Edit folder…", self._edit_selection)
+            menu.addAction("Delete folder…", self._delete_selection)
+            add_keys()
+        else:
+            menu.addAction("Connect", self._connect_selected)
+            menu.addSeparator()
+            menu.addAction("Edit server…", self._edit_selection)
+            menu.addAction("Duplicate…", self._duplicate_server)
+            menu.addAction("Delete server…", self._delete_selection)
+            menu.addSeparator()
+            s = self._server_by_id(iid)
+            parent_fid = s.folder_id if s else ""
+            menu.addAction(
+                "New folder (same level)…",
+                lambda: self._add_folder_at_parent(parent_fid),
+            )
+            menu.addAction(
+                "Add server (same level)…",
+                lambda: self._add_server_at_folder(parent_fid),
+            )
+            add_keys()
+        menu.exec(gpos)
 
     def _tree_selection(self) -> tuple[str, str] | None:
         items = self._tree.selectedItems()
@@ -709,33 +765,37 @@ class MainWindow(QMainWindow):
         save_servers(self.servers)
         self._populate_tree()
 
-    def _add_server(self) -> None:
-        df = self._default_folder_id_for_new_server()
+    def _add_server_at_folder(self, folder_id: str) -> None:
         created = run_server_dialog(
             self,
             self,
             title="Add server",
             server=None,
-            default_folder_id=df,
+            default_folder_id=folder_id,
         )
         if created:
             self.servers.append(created)
             save_servers(self.servers)
             self._populate_tree()
 
-    def _add_folder(self) -> None:
-        dp = self._default_parent_id_for_new_folder()
+    def _add_server(self) -> None:
+        self._add_server_at_folder(self._default_folder_id_for_new_server())
+
+    def _add_folder_at_parent(self, parent_id: str) -> None:
         created = run_folder_dialog(
             self,
             self,
             title="New folder",
             folder=None,
-            default_parent_id=dp,
+            default_parent_id=parent_id,
         )
         if created:
             self.folders.append(created)
             save_folders(self.folders)
             self._populate_tree()
+
+    def _add_folder(self) -> None:
+        self._add_folder_at_parent(self._default_parent_id_for_new_folder())
 
     def _edit_selection(self) -> None:
         sel = self._tree_selection()
