@@ -1,6 +1,6 @@
 # SSH Term
 
-Small macOS-friendly desktop app to keep a list of SSH servers, shared private key entries, and optional password auth. Organize entries in **folders and subfolders** in the sidebar tree. Double-click a server (or press Enter) to open a new **iTerm2** tab and run `ssh` with the right user, port, key, or password helper.
+Small macOS-friendly desktop app to keep a list of SSH servers, shared private key entries, and optional password auth. Organize entries in **folders and subfolders** in the sidebar tree. Double-click a server (or press Enter) to open a new **iTerm2** tab and run `ssh` with the right user, port, key, or password helper. The tab title is set to the **server name** (as shown in the app).
 
 ## Requirements
 

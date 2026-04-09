@@ -58,8 +58,12 @@ def build_ssh_shell_line(
     return " ".join(shlex.quote(a) for a in ssh_args), ""
 
 
-def open_iterm_with_command(command: str) -> tuple[bool, str]:
-    """Tell iTerm2 to open a new tab and run `command`. Returns (ok, message)."""
+def open_iterm_with_command(
+    command: str,
+    *,
+    tab_title: str | None = None,
+) -> tuple[bool, str]:
+    """Tell iTerm2 to open a new tab, optionally set its title, then run `command`."""
     if not shutil.which("osascript"):
         return False, "osascript not found (expected on macOS)."
 
@@ -67,6 +71,13 @@ def open_iterm_with_command(command: str) -> tuple[bool, str]:
         return False, "Command contains invalid characters."
 
     escaped = _applescript_string_literal(command)
+    title_lines = ""
+    if tab_title is not None:
+        t = tab_title.strip()
+        if "\n" in t or "\r" in t:
+            return False, "Tab title contains invalid characters."
+        if t:
+            title_lines = f'\n      set name to "{_applescript_string_literal(t)}"'
     script = f"""
 tell application "iTerm"
   activate
@@ -75,7 +86,7 @@ tell application "iTerm"
   end if
   tell current window
     create tab with default profile
-    tell current session of current tab
+    tell current session of current tab{title_lines}
       write text "{escaped}"
     end tell
   end tell
@@ -100,4 +111,4 @@ def connect_server(server: Server, keys: list[KeyEntry]) -> tuple[bool, str]:
     line, err = build_ssh_shell_line(server, keys)
     if err:
         return False, err
-    return open_iterm_with_command(line)
+    return open_iterm_with_command(line, tab_title=server.name)
