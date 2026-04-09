@@ -8,8 +8,8 @@ Small macOS-friendly desktop app to keep a list of SSH servers, shared private k
 - **Python 3.10+**
 - **[iTerm2](https://iterm2.com/)** installed
 - **PySide6** (Qt) for the UI — see `requirements.txt`
-- **pynput** (installed automatically on macOS) for the global **⌘E** shortcut
-- **PyObjC** (`pyobjc-framework-Cocoa` on macOS) for **View → Hide Dock icon**
+- **PyObjC** (`pyobjc-framework-Cocoa` on macOS) for **View → Hide Dock icon** and **native ⌘E** (AppKit `NSEvent` global + local monitors)
+- **pynput** (macOS only, optional) — **fallback** for ⌘E if the native path is unavailable
 
 ## Quick start
 
@@ -49,7 +49,7 @@ The installer builds a **real `SSH Term.app`** on your Desktop: it **`exec`s Pyt
 
 Run it again if you **move the repo** (the app embeds the clone path). It removes any legacy **`SSH Term.command`**.
 
-**⌘E / Input Monitoring:** after launching from **`SSH Term.app`**, grant **Input Monitoring** to **`SSH Term`** (that Desktop app) under *System Settings → Privacy & Security*, then **quit and reopen** once. Permissions are per‑app; if you used Terminal before, you must allow the Desktop app separately.
+**⌘E / privacy (Desktop app):** allow **`SSH Term`** under **Accessibility** so ⌘E works while other apps are focused. macOS may also show **Input Monitoring**; enable it if prompted. Permissions are **per app** — the Desktop **`SSH Term.app`** is separate from **Terminal** / **Python** when you run from a venv. **Quit and reopen** once after changing toggles.
 
 Delete **`SSH Term.app`** from the Desktop to remove the shortcut. If Gatekeeper blocks it the first time, use **right‑click → Open**.
 
@@ -88,7 +88,7 @@ The first time you connect, macOS may ask to allow **Automation** so the app (or
 
 **Hide Dock icon**: Use **View → Hide Dock icon** to run as an accessory app (no Dock tile). The choice is saved in `preferences.json`. Toggle off to show the app in the Dock again.
 
-**Background launcher**: On macOS, if global ⌘E is available, the app starts with no open window; ⌘E shows it and brings it forward. The close box only **hides** the window — the process keeps running until **View → Quit** or **⌘Q** while the app is focused. If pynput is missing, the main window opens on launch so the UI stays reachable.
+**Background launcher**: On macOS, if **⌘E registration** succeeds (native `NSEvent` and/or **pynput**), the app starts with **no open window**; **⌘E** or **View → Show window** brings it forward. The close box only **hides** the window; the process keeps running until **View → Quit** or **⌘Q** while the app is focused. If **both** hotkey paths fail, the main window **opens on launch** so the UI is still reachable.
 
 **Global ⌘E**: The app uses **NSEvent** (PyObjC) for ⌘E when possible. Allow **SSH Term** under **Accessibility** so keystrokes can be observed while you use other apps; macOS may also list **Input Monitoring**. Enable **Python** or **Terminal** too when you run `main.py` from a shell. Other focused apps may consume ⌘E before the OS delivers it.
 
@@ -106,14 +106,14 @@ This creates **`dist/SSH Term.app`** and **`dist/SSH-Term-0.1.0.pkg`**. The pack
 
 - `assets/app_icon.png` — window / app icon (replace to customize)
 - `main.py` — Qt UI
-- `global_hotkey.py` — optional system-wide ⌘E (macOS / pynput)
+- `global_hotkey.py` — system-wide ⌘E on macOS (**NSEvent** via PyObjC, **pynput** fallback)
 - `macos_dock.py` — optional Dock visibility (macOS / PyObjC)
 - `macos_reopen.py` — Dock / activate: show main window when the app is brought forward (macOS / Qt)
 - `storage.py` — JSON load/save, password encode/decode
 - `iterm_ssh.py` — builds the `ssh` command and runs AppleScript against iTerm2
 - `launch.sh` — starts `main.py` in the **background** by default (see **Quick start**); uses venv python when available
 - `scripts/build-macos-pkg.sh` — PyInstaller + `pkgbuild` for `.app` / `.pkg`
-- `scripts/install-desktop-launcher.sh` — builds `SSH Term.app` on the Desktop (shortcut to `launch.sh`, no Terminal)
+- `scripts/install-desktop-launcher.sh` — builds `~/Desktop/SSH Term.app` that **`exec`s venv/system `python` → `main.py`** (no Terminal; not the same as `launch.sh`)
 
 ## License
 

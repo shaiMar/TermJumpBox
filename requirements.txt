@@ -1,5 +1,4 @@
 PySide6-Essentials>=6.5.0
-# System-wide ⌘E to show the window (macOS requires Input Monitoring for the app).
+# macOS: native ⌘E (NSEvent) + Dock hide; optional pynput fallback for ⌘E.
 pynput>=1.7.6; platform_system == "Darwin"
-# Dock hide (NSApplication activation policy); macOS only.
 pyobjc-framework-Cocoa>=10.0; platform_system == "Darwin"
