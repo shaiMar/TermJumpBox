@@ -7,9 +7,10 @@ import shutil
 import sys
 import uuid
 from dataclasses import replace
+from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QColor, QDropEvent, QKeySequence, QPalette, QShortcut
+from PySide6.QtGui import QColor, QDropEvent, QIcon, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -989,6 +990,13 @@ class MainWindow(QMainWindow):
             )
 
 
+def _application_icon() -> QIcon:
+    path = Path(__file__).resolve().parent / "assets" / "app_icon.png"
+    if path.is_file():
+        return QIcon(str(path))
+    return QIcon()
+
+
 def apply_dark_theme(app: QApplication) -> None:
     app.setStyle("Fusion")
     p = QPalette()
@@ -1011,8 +1019,13 @@ def apply_dark_theme(app: QApplication) -> None:
 
 def main() -> None:
     app = QApplication(sys.argv)
+    icon = _application_icon()
+    if not icon.isNull():
+        app.setWindowIcon(icon)
     apply_dark_theme(app)
     w = MainWindow()
+    if not icon.isNull():
+        w.setWindowIcon(icon)
     w.show()
     raise SystemExit(app.exec())
 

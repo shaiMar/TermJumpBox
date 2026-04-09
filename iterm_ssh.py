@@ -63,32 +63,41 @@ def open_iterm_with_command(
     *,
     tab_title: str | None = None,
 ) -> tuple[bool, str]:
-    """Tell iTerm2 to open a new tab, optionally set its title, then run `command`."""
+    """Tell iTerm2 to open a new tab, optionally set its title, then run `command`.
+
+    Uses \"create tab ... command\" so iTerm runs the shell command directly instead of
+    typing into an interactive shell. That avoids racey \"write text\" (duplicate lines,
+    broken prompts) and avoids embedding OSC/printf noise in scrollback.
+    """
     if not shutil.which("osascript"):
         return False, "osascript not found (expected on macOS)."
 
     if "\n" in command or "\r" in command:
         return False, "Command contains invalid characters."
 
-    escaped = _applescript_string_literal(command)
-    title_lines = ""
     if tab_title is not None:
         t = tab_title.strip()
         if "\n" in t or "\r" in t:
             return False, "Tab title contains invalid characters."
-        if t:
-            title_lines = f'\n      set name to "{_applescript_string_literal(t)}"'
+
+    escaped_cmd = _applescript_string_literal(command)
+    title_block = ""
+    if tab_title is not None:
+        ts = tab_title.strip()
+        if ts:
+            esc_title = _applescript_string_literal(ts)
+            title_block = f"""
+    tell current session of current tab
+      set name to "{esc_title}"
+    end tell"""
     script = f"""
-tell application "iTerm"
+tell application "iTerm2"
   activate
   if (count of windows) = 0 then
     create window with default profile
   end if
   tell current window
-    create tab with default profile
-    tell current session of current tab{title_lines}
-      write text "{escaped}"
-    end tell
+    create tab with default profile command "{escaped_cmd}"{title_block}
   end tell
 end tell
 """

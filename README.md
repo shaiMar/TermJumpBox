@@ -54,6 +54,7 @@ The first time you connect, macOS may ask to allow **Automation** so the app (or
 
 ## Project layout
 
+- `assets/app_icon.png` — window / app icon (replace to customize)
 - `main.py` — Qt UI
 - `storage.py` — JSON load/save, password encode/decode
 - `iterm_ssh.py` — builds the `ssh` command and runs AppleScript against iTerm2
