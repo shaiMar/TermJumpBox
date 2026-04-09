@@ -11,7 +11,16 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPoint, Qt, Signal
-from PySide6.QtGui import QColor, QDropEvent, QIcon, QKeySequence, QPalette, QShortcut
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QColor,
+    QDropEvent,
+    QIcon,
+    QKeySequence,
+    QPalette,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -41,15 +50,19 @@ from PySide6.QtWidgets import (
 
 import iterm_ssh
 from global_hotkey import start_global_hotkey_macos
+from macos_dock import dock_toggle_available, set_hide_dock_icon
+from macos_reopen import install_dock_click_show_window
 from storage import (
     Folder,
     KeyEntry,
     Server,
     load_app_state,
+    load_preferences,
     new_folder_id,
     new_server_id,
     save_folders,
     save_keys,
+    save_preferences,
     save_servers,
     servers_using_key,
 )
@@ -617,10 +630,11 @@ class ServerTreeWidget(QTreeWidget):
 class MainWindow(QMainWindow):
     _TREE_ROLE = Qt.ItemDataRole.UserRole
 
-    def __init__(self) -> None:
+    def __init__(self, preferences: dict | None = None) -> None:
         super().__init__()
         self.setWindowTitle("SSH Term")
         self.resize(780, 440)
+        self._preferences = dict(preferences) if preferences is not None else load_preferences()
         self.servers, self.keys, self.folders = load_app_state()
 
         central = QWidget()
@@ -638,8 +652,9 @@ class MainWindow(QMainWindow):
         top.addWidget(self._btn("SSH keys…", self._open_keys))
         top.addStretch(1)
         hint = QLabel(
-            "Double-click a server to open iTerm2. On Mac, ⌘D shows this window "
-            "system-wide (enable Input Monitoring for this app if macOS asks)."
+            "Double-click a server to open iTerm2. On Mac the app starts in the "
+            "background; ⌘E shows this window. Closing the window hides it — ⌘E "
+            "opens it again (enable Input Monitoring if macOS asks)."
         )
         hint.setStyleSheet("color: #aaa;")
         top.addWidget(hint)
@@ -674,6 +689,54 @@ class MainWindow(QMainWindow):
         root.addWidget(self._tree, 1)
 
         self._populate_tree()
+        self._dock_action: QAction | None = None
+        self._setup_view_menu()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Keep the app running: the window is only hidden (use ⌘E to show again)."""
+        event.ignore()
+        self.hide()
+
+    def _setup_view_menu(self) -> None:
+        view = self.menuBar().addMenu("View")
+        show_act = QAction("Show window", self)
+        show_act.setShortcut("Ctrl+E" if sys.platform != "darwin" else "Meta+E")
+        show_act.triggered.connect(self.bring_to_front)
+        view.addAction(show_act)
+        view.addSeparator()
+        if dock_toggle_available():
+            self._dock_action = QAction("Hide Dock icon", self)
+            self._dock_action.setCheckable(True)
+            self._dock_action.setChecked(self._preferences.get("hide_dock_icon", False))
+            self._dock_action.toggled.connect(self._on_hide_dock_toggled)
+            view.addAction(self._dock_action)
+            view.addSeparator()
+        quit_act = QAction("Quit", self)
+        quit_act.setShortcut(QKeySequence.StandardKey.Quit)
+        quit_act.triggered.connect(self._quit_application)
+        view.addAction(quit_act)
+
+    @staticmethod
+    def _quit_application() -> None:
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
+    def _on_hide_dock_toggled(self, checked: bool) -> None:
+        if not set_hide_dock_icon(checked):
+            QMessageBox.warning(
+                self,
+                "Dock",
+                "Could not change Dock visibility. Try restarting the app.",
+            )
+            act = self._dock_action
+            if act:
+                act.blockSignals(True)
+                act.setChecked(not checked)
+                act.blockSignals(False)
+            return
+        self._preferences["hide_dock_icon"] = checked
+        save_preferences({"hide_dock_icon": checked})
 
     def bring_to_front(self) -> None:
         if self.isMinimized():
@@ -1068,11 +1131,15 @@ def apply_dark_theme(app: QApplication) -> None:
 
 def main() -> None:
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     icon = _application_icon()
     if not icon.isNull():
         app.setWindowIcon(icon)
     apply_dark_theme(app)
-    w = MainWindow()
+    prefs = load_preferences()
+    if sys.platform == "darwin" and dock_toggle_available():
+        set_hide_dock_icon(prefs.get("hide_dock_icon", False))
+    w = MainWindow(preferences=prefs)
     if not icon.isNull():
         w.setWindowIcon(icon)
     bridge = ShowLauncherBridge(w)
@@ -1080,15 +1147,18 @@ def main() -> None:
         w.bring_to_front,
         Qt.ConnectionType.QueuedConnection,
     )
+    hotkey_ok = False
     if sys.platform == "darwin":
-        if not start_global_hotkey_macos(bridge):
+        hotkey_ok = bool(start_global_hotkey_macos(bridge, app))
+        if not hotkey_ok:
             print(
-                "SSH Term: global ⌘D needs pynput (pip install pynput). "
-                "After installing, allow Input Monitoring for this app in "
-                "System Settings → Privacy & Security.",
+                "SSH Term: ⌘E could not start (install pynput, or PyObjC for native hotkeys).",
                 file=sys.stderr,
             )
-    w.show()
+    # macOS + working ⌘E: start with no window; otherwise show so the UI is reachable.
+    if sys.platform != "darwin" or not hotkey_ok:
+        w.show()
+    install_dock_click_show_window(w, app)
     raise SystemExit(app.exec())
 
 

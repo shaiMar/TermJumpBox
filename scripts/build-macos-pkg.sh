@@ -24,6 +24,10 @@ rm -rf build dist
   --hidden-import iterm_ssh \
   --hidden-import storage \
   --hidden-import global_hotkey \
+  --hidden-import macos_dock \
+  --hidden-import macos_reopen \
+  --hidden-import AppKit \
+  --collect-submodules objc \
   main.py
 
 STAGE="$(mktemp -d)"

@@ -14,6 +14,7 @@ CONFIG_DIR = Path.home() / ".config" / "ssh-term"
 SERVERS_FILE = CONFIG_DIR / "servers.json"
 KEYS_FILE = CONFIG_DIR / "keys.json"
 FOLDERS_FILE = CONFIG_DIR / "folders.json"
+PREFERENCES_FILE = CONFIG_DIR / "preferences.json"
 
 # Fixed app seed — only hides passwords from casual file viewers; not real security.
 _PW_SEED = b"sshTerm.v1.password-obfuscation\x00"
@@ -144,6 +145,33 @@ def _migrate_server_dict(d: dict, keys: list[KeyEntry]) -> tuple[dict, bool]:
         out["folder_id"] = ""
         changed = True
     return out, changed
+
+
+def load_preferences() -> dict:
+    """App UI prefs; keys include ``hide_dock_icon`` (bool, macOS Dock)."""
+    defaults: dict = {"hide_dock_icon": False}
+    ensure_config()
+    if not PREFERENCES_FILE.is_file():
+        return dict(defaults)
+    try:
+        raw = json.loads(PREFERENCES_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return dict(defaults)
+    if not isinstance(raw, dict):
+        return dict(defaults)
+    out = dict(defaults)
+    out["hide_dock_icon"] = bool(raw.get("hide_dock_icon", False))
+    return out
+
+
+def save_preferences(updates: dict) -> None:
+    cur = load_preferences()
+    cur.update(updates)
+    ensure_config()
+    PREFERENCES_FILE.write_text(
+        json.dumps(cur, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
 
 
 def load_folders() -> list[Folder]:
