@@ -13,6 +13,7 @@ from typing import Literal
 CONFIG_DIR = Path.home() / ".config" / "ssh-term"
 SERVERS_FILE = CONFIG_DIR / "servers.json"
 KEYS_FILE = CONFIG_DIR / "keys.json"
+FOLDERS_FILE = CONFIG_DIR / "folders.json"
 
 # Fixed app seed — only hides passwords from casual file viewers; not real security.
 _PW_SEED = b"sshTerm.v1.password-obfuscation\x00"
@@ -56,6 +57,15 @@ class KeyEntry:
 
 
 @dataclass
+class Folder:
+    """Logical group for servers; `parent_id` empty means top level."""
+
+    id: str
+    name: str
+    parent_id: str = ""
+
+
+@dataclass
 class Server:
     id: str
     name: str
@@ -65,6 +75,7 @@ class Server:
     auth: Literal["key", "password"]
     key_id: str
     password: str = ""
+    folder_id: str = ""
 
     def display_host(self) -> str:
         if self.port == 22:
@@ -129,15 +140,35 @@ def _migrate_server_dict(d: dict, keys: list[KeyEntry]) -> tuple[dict, bool]:
         out["password"] = ""
         if out.get("auth") == "password":
             changed = True
+    if "folder_id" not in out:
+        out["folder_id"] = ""
+        changed = True
     return out, changed
 
 
-def load_app_state() -> tuple[list[Server], list[KeyEntry]]:
-    """Load servers and keys; migrate legacy server JSON and persist if needed."""
+def load_folders() -> list[Folder]:
+    ensure_config()
+    if not FOLDERS_FILE.is_file():
+        return []
+    raw = json.loads(FOLDERS_FILE.read_text(encoding="utf-8"))
+    return [Folder(**item) for item in raw]
+
+
+def save_folders(folders: list[Folder]) -> None:
+    ensure_config()
+    FOLDERS_FILE.write_text(
+        json.dumps([asdict(f) for f in folders], indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_app_state() -> tuple[list[Server], list[KeyEntry], list[Folder]]:
+    """Load servers, keys, and folders; migrate legacy JSON and persist if needed."""
     keys = load_keys()
+    folders = load_folders()
     ensure_config()
     if not SERVERS_FILE.is_file():
-        return [], keys
+        return [], keys, folders
     raw_list = json.loads(SERVERS_FILE.read_text(encoding="utf-8"))
     migrated = False
     legacy_plain_password = False
@@ -161,6 +192,7 @@ def load_app_state() -> tuple[list[Server], list[KeyEntry]]:
                     auth=d["auth"],  # type: ignore[arg-type]
                     key_id=(d.get("key_id") or "").strip(),
                     password=_password_decode_from_storage(pw_raw),
+                    folder_id=(d.get("folder_id") or "").strip(),
                 )
             )
         except (KeyError, TypeError, ValueError):
@@ -170,7 +202,7 @@ def load_app_state() -> tuple[list[Server], list[KeyEntry]]:
         save_servers(servers)
     elif legacy_plain_password:
         save_servers(servers)
-    return servers, keys
+    return servers, keys, folders
 
 
 def save_servers(servers: list[Server]) -> None:
@@ -184,6 +216,10 @@ def save_servers(servers: list[Server]) -> None:
 
 
 def new_server_id() -> str:
+    return str(uuid.uuid4())
+
+
+def new_folder_id() -> str:
     return str(uuid.uuid4())
 
 

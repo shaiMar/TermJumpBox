@@ -10,6 +10,7 @@ import uuid
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QButtonGroup,
     QComboBox,
@@ -27,6 +28,8 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QTableWidget,
     QTableWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QFileDialog,
     QVBoxLayout,
     QWidget,
@@ -34,14 +37,39 @@ from PySide6.QtWidgets import (
 
 import iterm_ssh
 from storage import (
+    Folder,
     KeyEntry,
     Server,
     load_app_state,
+    new_folder_id,
     new_server_id,
+    save_folders,
     save_keys,
     save_servers,
     servers_using_key,
 )
+
+
+def _folder_combo_rows(
+    folders: list[Folder],
+    *,
+    exclude_ids: frozenset[str] | set[str] | None = None,
+) -> list[tuple[str, str]]:
+    """`(label, folder_id)` for a combo box; empty id means root."""
+    ex = exclude_ids or set()
+    rows: list[tuple[str, str]] = [("— Root —", "")]
+    by_parent: dict[str, list[Folder]] = {}
+    for f in folders:
+        by_parent.setdefault(f.parent_id, []).append(f)
+
+    def walk(parent_id: str, prefix: str) -> None:
+        for f in sorted(by_parent.get(parent_id, []), key=lambda x: x.name.lower()):
+            if f.id not in ex:
+                rows.append((f"{prefix}{f.name}", f.id))
+            walk(f.id, prefix + "    ")
+
+    walk("", "")
+    return rows
 
 
 class KeyEditDialog(QDialog):
@@ -123,6 +151,86 @@ def run_key_edit(
     return None
 
 
+class FolderEditDialog(QDialog):
+    def __init__(
+        self,
+        parent: QWidget | None,
+        main: "MainWindow",
+        *,
+        title: str,
+        folder: Folder | None = None,
+        default_parent_id: str = "",
+    ):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self._main = main
+        self.result_folder: Folder | None = None
+        self._existing = folder
+        self._folder_id = folder.id if folder else new_folder_id()
+
+        self._name = QLineEdit(folder.name if folder else "")
+
+        self._parent_combo: QComboBox | None = None
+        form = QFormLayout()
+        form.addRow("Name", self._name)
+        if folder is None:
+            self._parent_combo = QComboBox()
+            for label, fid in _folder_combo_rows(main.folders):
+                self._parent_combo.addItem(label, fid)
+            sel = default_parent_id or ""
+            for i in range(self._parent_combo.count()):
+                if self._parent_combo.itemData(i) == sel:
+                    self._parent_combo.setCurrentIndex(i)
+                    break
+            form.addRow("Parent folder", self._parent_combo)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
+        )
+        buttons.accepted.connect(self._try_accept)
+        buttons.rejected.connect(self.reject)
+
+        outer = QVBoxLayout(self)
+        outer.addLayout(form)
+        outer.addWidget(buttons)
+
+    def _try_accept(self) -> None:
+        name = self._name.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Validation", "Folder name is required.")
+            return
+        parent_id = ""
+        if self._existing is None and self._parent_combo is not None:
+            i = self._parent_combo.currentIndex()
+            if i >= 0:
+                d = self._parent_combo.itemData(i)
+                parent_id = str(d) if d is not None else ""
+        elif self._existing is not None:
+            parent_id = self._existing.parent_id
+        self.result_folder = Folder(id=self._folder_id, name=name, parent_id=parent_id)
+        self.accept()
+
+
+def run_folder_dialog(
+    parent: QWidget | None,
+    main: "MainWindow",
+    *,
+    title: str,
+    folder: Folder | None = None,
+    default_parent_id: str = "",
+) -> Folder | None:
+    dlg = FolderEditDialog(
+        parent,
+        main,
+        title=title,
+        folder=folder,
+        default_parent_id=default_parent_id,
+    )
+    if dlg.exec() == QDialog.DialogCode.Accepted:
+        return dlg.result_folder
+    return None
+
+
 class ServerDialog(QDialog):
     def __init__(
         self,
@@ -131,6 +239,7 @@ class ServerDialog(QDialog):
         *,
         title: str,
         server: Server | None = None,
+        default_folder_id: str = "",
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -194,11 +303,21 @@ class ServerDialog(QDialog):
         self._radio_key.toggled.connect(lambda _: self._update_auth_visibility())
         self._radio_pw.toggled.connect(lambda _: self._update_auth_visibility())
 
+        self._folder_combo = QComboBox()
+        for label, fid in _folder_combo_rows(self._main.folders):
+            self._folder_combo.addItem(label, fid)
+        target_fid = (server.folder_id if server else default_folder_id) or ""
+        for i in range(self._folder_combo.count()):
+            if self._folder_combo.itemData(i) == target_fid:
+                self._folder_combo.setCurrentIndex(i)
+                break
+
         form = QFormLayout()
         form.addRow("Name", self._name)
         form.addRow("Host", self._host)
         form.addRow("Port", self._port)
         form.addRow("Username", self._user)
+        form.addRow("Folder", self._folder_combo)
         form.addRow(auth_box)
 
         buttons = QDialogButtonBox(
@@ -298,6 +417,12 @@ class ServerDialog(QDialog):
                 )
                 return
 
+        fi = self._folder_combo.currentIndex()
+        folder_id = ""
+        if fi >= 0:
+            d = self._folder_combo.itemData(fi)
+            folder_id = str(d) if d is not None else ""
+
         server = Server(
             id=sid,
             name=name,
@@ -307,6 +432,7 @@ class ServerDialog(QDialog):
             auth=auth,  # type: ignore[arg-type]
             key_id=key_id if auth == "key" else "",
             password=password_field,
+            folder_id=folder_id,
         )
 
         self.result_server = server
@@ -319,8 +445,15 @@ def run_server_dialog(
     *,
     title: str,
     server: Server | None = None,
+    default_folder_id: str = "",
 ) -> Server | None:
-    dlg = ServerDialog(parent, main, title=title, server=server)
+    dlg = ServerDialog(
+        parent,
+        main,
+        title=title,
+        server=server,
+        default_folder_id=default_folder_id,
+    )
     if dlg.exec() == QDialog.DialogCode.Accepted:
         return dlg.result_server
     return None
@@ -429,20 +562,23 @@ class KeysManagerDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
+    _TREE_ROLE = Qt.ItemDataRole.UserRole
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("SSH Term")
         self.resize(780, 440)
-        self.servers, self.keys = load_app_state()
+        self.servers, self.keys, self.folders = load_app_state()
 
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
         top = QHBoxLayout()
-        top.addWidget(self._btn("Add…", self._add_server))
-        top.addWidget(self._btn("Edit…", self._edit_server))
-        top.addWidget(self._btn("Delete", self._delete_server))
+        top.addWidget(self._btn("Add server…", self._add_server))
+        top.addWidget(self._btn("Add folder…", self._add_folder))
+        top.addWidget(self._btn("Edit…", self._edit_selection))
+        top.addWidget(self._btn("Delete…", self._delete_selection))
         top.addWidget(self._btn("Connect", self._connect_selected))
         top.addSpacing(16)
         top.addWidget(self._btn("SSH keys…", self._open_keys))
@@ -457,25 +593,23 @@ class MainWindow(QMainWindow):
             warn.setStyleSheet("color: #a30;")
             root.addWidget(warn)
 
-        self._table = QTableWidget(0, 3)
-        self._table.setHorizontalHeaderLabels(["Name", "User @ Host", "Auth"])
-        self._table.horizontalHeader().setSectionResizeMode(
+        self._tree = QTreeWidget()
+        self._tree.setColumnCount(3)
+        self._tree.setHeaderLabels(["Name", "User @ Host", "Auth"])
+        self._tree.header().setSectionResizeMode(
             0, QHeaderView.ResizeMode.ResizeToContents
         )
-        self._table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch
-        )
-        self._table.horizontalHeader().setSectionResizeMode(
+        self._tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self._tree.header().setSectionResizeMode(
             2, QHeaderView.ResizeMode.ResizeToContents
         )
-        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._table.itemDoubleClicked.connect(lambda _item: self._connect_selected())
-        QShortcut(QKeySequence(Qt.Key.Key_Return), self._table, self._connect_selected)
-        QShortcut(QKeySequence(Qt.Key.Key_Enter), self._table, self._connect_selected)
-        root.addWidget(self._table, 1)
+        self._tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._tree.itemDoubleClicked.connect(self._on_tree_double_click)
+        QShortcut(QKeySequence(Qt.Key.Key_Return), self._tree, self._connect_selected)
+        QShortcut(QKeySequence(Qt.Key.Key_Enter), self._tree, self._connect_selected)
+        root.addWidget(self._tree, 1)
 
-        self._refresh_server_table()
+        self._populate_tree()
 
     @staticmethod
     def _btn(text: str, slot) -> QPushButton:
@@ -486,72 +620,155 @@ class MainWindow(QMainWindow):
     def _open_keys(self) -> None:
         KeysManagerDialog(self, self).exec()
 
-    def _selected_server_id(self) -> str | None:
-        row = self._table.currentRow()
-        if row < 0:
+    def _tree_selection(self) -> tuple[str, str] | None:
+        items = self._tree.selectedItems()
+        if not items:
             return None
-        item = self._table.item(row, 0)
-        if item is None:
+        d = items[0].data(0, MainWindow._TREE_ROLE)
+        if not d or not isinstance(d, (list, tuple)) or len(d) != 2:
             return None
-        d = item.data(Qt.ItemDataRole.UserRole)
-        return str(d) if d else None
+        kind, iid = d[0], d[1]
+        if kind in ("folder", "server") and isinstance(iid, str):
+            return kind, iid
+        return None
+
+    def _default_folder_id_for_new_server(self) -> str:
+        sel = self._tree_selection()
+        if not sel:
+            return ""
+        kind, iid = sel
+        if kind == "folder":
+            return iid
+        s = self._server_by_id(iid)
+        return s.folder_id if s else ""
+
+    def _default_parent_id_for_new_folder(self) -> str:
+        sel = self._tree_selection()
+        if not sel:
+            return ""
+        kind, iid = sel
+        if kind == "folder":
+            return iid
+        s = self._server_by_id(iid)
+        return s.folder_id if s else ""
+
+    def _populate_tree(self) -> None:
+        self._tree.clear()
+
+        def add_under(parent: QTreeWidgetItem, parent_folder_id: str) -> None:
+            for f in sorted(
+                [x for x in self.folders if x.parent_id == parent_folder_id],
+                key=lambda x: x.name.lower(),
+            ):
+                fi = QTreeWidgetItem(parent)
+                fi.setText(0, f.name)
+                fi.setText(1, "")
+                fi.setText(2, "Folder")
+                fi.setData(0, MainWindow._TREE_ROLE, ("folder", f.id))
+                add_under(fi, f.id)
+            for s in sorted(
+                [x for x in self.servers if x.folder_id == parent_folder_id],
+                key=lambda x: x.name.lower(),
+            ):
+                si = QTreeWidgetItem(parent)
+                auth_label = "Key" if s.auth == "key" else "Password"
+                si.setText(0, s.name)
+                si.setText(1, f"{s.username}@{s.display_host()}")
+                si.setText(2, auth_label)
+                si.setData(0, MainWindow._TREE_ROLE, ("server", s.id))
+
+        add_under(self._tree.invisibleRootItem(), "")
+        self._tree.expandAll()
 
     def _server_by_id(self, sid: str) -> Server | None:
         return next((s for s in self.servers if s.id == sid), None)
 
-    def _refresh_server_table(self) -> None:
-        self._table.setRowCount(0)
-        for s in sorted(self.servers, key=lambda x: x.name.lower()):
-            r = self._table.rowCount()
-            self._table.insertRow(r)
-            auth_label = "Key" if s.auth == "key" else "Password"
-            a = QTableWidgetItem(s.name)
-            a.setData(Qt.ItemDataRole.UserRole, s.id)
-            self._table.setItem(r, 0, a)
-            self._table.setItem(
-                r,
-                1,
-                QTableWidgetItem(f"{s.username}@{s.display_host()}"),
-            )
-            self._table.setItem(r, 2, QTableWidgetItem(auth_label))
+    def _folder_by_id(self, fid: str) -> Folder | None:
+        return next((f for f in self.folders if f.id == fid), None)
 
     def _add_server(self) -> None:
-        created = run_server_dialog(self, self, title="Add server", server=None)
+        df = self._default_folder_id_for_new_server()
+        created = run_server_dialog(
+            self,
+            self,
+            title="Add server",
+            server=None,
+            default_folder_id=df,
+        )
         if created:
             self.servers.append(created)
             save_servers(self.servers)
-            self._refresh_server_table()
+            self._populate_tree()
 
-    def _edit_server(self) -> None:
-        sid = self._selected_server_id()
-        if not sid:
-            QMessageBox.information(self, "Edit", "Select a server first.")
-            return
-        s = self._server_by_id(sid)
-        if not s:
-            return
-        updated = run_server_dialog(self, self, title="Edit server", server=s)
-        if not updated:
-            return
-        for i, x in enumerate(self.servers):
-            if x.id == updated.id:
-                self.servers[i] = updated
-                break
-        save_servers(self.servers)
-        self._refresh_server_table()
+    def _add_folder(self) -> None:
+        dp = self._default_parent_id_for_new_folder()
+        created = run_folder_dialog(
+            self,
+            self,
+            title="New folder",
+            folder=None,
+            default_parent_id=dp,
+        )
+        if created:
+            self.folders.append(created)
+            save_folders(self.folders)
+            self._populate_tree()
 
-    def _delete_server(self) -> None:
-        sid = self._selected_server_id()
-        if not sid:
-            QMessageBox.information(self, "Delete", "Select a server first.")
+    def _edit_selection(self) -> None:
+        sel = self._tree_selection()
+        if not sel:
+            QMessageBox.information(self, "Edit", "Select a folder or server first.")
             return
+        kind, iid = sel
+        if kind == "server":
+            s = self._server_by_id(iid)
+            if not s:
+                return
+            updated = run_server_dialog(self, self, title="Edit server", server=s)
+            if updated:
+                for i, x in enumerate(self.servers):
+                    if x.id == updated.id:
+                        self.servers[i] = updated
+                        break
+                save_servers(self.servers)
+                self._populate_tree()
+            return
+        f = self._folder_by_id(iid)
+        if not f:
+            return
+        updated = run_folder_dialog(
+            self,
+            self,
+            title="Rename folder",
+            folder=f,
+        )
+        if updated:
+            for i, x in enumerate(self.folders):
+                if x.id == updated.id:
+                    self.folders[i] = updated
+                    break
+            save_folders(self.folders)
+            self._populate_tree()
+
+    def _delete_selection(self) -> None:
+        sel = self._tree_selection()
+        if not sel:
+            QMessageBox.information(self, "Delete", "Select a folder or server first.")
+            return
+        kind, iid = sel
+        if kind == "server":
+            self._delete_server_by_id(iid)
+        else:
+            self._delete_folder_by_id(iid)
+
+    def _delete_server_by_id(self, sid: str) -> None:
         s = self._server_by_id(sid)
         if not s:
             return
         r = QMessageBox.question(
             self,
             "Delete",
-            f"Remove “{s.name}” from the list?",
+            f"Remove server “{s.name}”?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -559,14 +776,50 @@ class MainWindow(QMainWindow):
             return
         self.servers = [x for x in self.servers if x.id != s.id]
         save_servers(self.servers)
-        self._refresh_server_table()
+        self._populate_tree()
+
+    def _delete_folder_by_id(self, fid: str) -> None:
+        f = self._folder_by_id(fid)
+        if not f:
+            return
+        if any(s.folder_id == fid for s in self.servers):
+            QMessageBox.warning(
+                self,
+                "Cannot delete",
+                "This folder still contains servers. Move or delete them first.",
+            )
+            return
+        if any(ch.parent_id == fid for ch in self.folders):
+            QMessageBox.warning(
+                self,
+                "Cannot delete",
+                "This folder still contains subfolders. Delete or move them first.",
+            )
+            return
+        r = QMessageBox.question(
+            self,
+            "Delete",
+            f"Remove folder “{f.name}”?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if r != QMessageBox.StandardButton.Yes:
+            return
+        self.folders = [x for x in self.folders if x.id != fid]
+        save_folders(self.folders)
+        self._populate_tree()
+
+    def _on_tree_double_click(self, item: QTreeWidgetItem, _column: int) -> None:
+        d = item.data(0, MainWindow._TREE_ROLE)
+        if d and isinstance(d, (list, tuple)) and len(d) == 2 and d[0] == "server":
+            self._connect_selected()
 
     def _connect_selected(self) -> None:
-        sid = self._selected_server_id()
-        if not sid:
-            QMessageBox.information(self, "Connect", "Select a server first.")
+        sel = self._tree_selection()
+        if not sel or sel[0] != "server":
+            QMessageBox.information(self, "Connect", "Select a server row first.")
             return
-        s = self._server_by_id(sid)
+        s = self._server_by_id(sel[1])
         if not s:
             return
         ok, msg = iterm_ssh.connect_server(s, self.keys)

@@ -1,6 +1,6 @@
 # SSH Term
 
-Small macOS-friendly desktop app to keep a list of SSH servers, shared private key entries, and optional password auth. Double-click a server (or press Enter) to open a new **iTerm2** tab and run `ssh` with the right user, port, key, or password helper.
+Small macOS-friendly desktop app to keep a list of SSH servers, shared private key entries, and optional password auth. Organize entries in **folders and subfolders** in the sidebar tree. Double-click a server (or press Enter) to open a new **iTerm2** tab and run `ssh` with the right user, port, key, or password helper.
 
 ## Requirements
 
@@ -27,8 +27,11 @@ Configuration lives under **`~/.config/ssh-term/`**:
 
 | File         | Contents |
 |-------------|----------|
-| `servers.json` | Server entries (host, user, port, auth type, key id, obfuscated password if used) |
+| `servers.json` | Server entries (host, user, port, auth type, key id, folder id, obfuscated password if used) |
 | `keys.json`    | Named SSH private key paths (many servers can share one key id) |
+| `folders.json` | Folder tree (`name`, `parent_id`; empty parent means top level) |
+
+Use **Add folder…** / **Add server…** with a row selected to create a subfolder or server inside that folder (or choose **Folder** in the server dialog). A folder must be empty (no servers, no subfolders) before you delete it.
 
 Passwords are stored with a **fixed in-app obfuscation** (XOR + base64, prefix `enc1:`). That is not strong encryption; anyone with this repo can decode them. It only reduces casual exposure in the JSON file.
 
