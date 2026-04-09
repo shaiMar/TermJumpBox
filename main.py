@@ -6,6 +6,7 @@ from __future__ import annotations
 import shutil
 import sys
 import uuid
+from dataclasses import replace
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QKeySequence, QPalette, QShortcut
@@ -578,6 +579,7 @@ class MainWindow(QMainWindow):
         top.addWidget(self._btn("Add server…", self._add_server))
         top.addWidget(self._btn("Add folder…", self._add_folder))
         top.addWidget(self._btn("Edit…", self._edit_selection))
+        top.addWidget(self._btn("Duplicate…", self._duplicate_server))
         top.addWidget(self._btn("Delete…", self._delete_selection))
         top.addWidget(self._btn("Connect", self._connect_selected))
         top.addSpacing(16)
@@ -685,6 +687,27 @@ class MainWindow(QMainWindow):
 
     def _folder_by_id(self, fid: str) -> Folder | None:
         return next((f for f in self.folders if f.id == fid), None)
+
+    def _duplicate_server(self) -> None:
+        sel = self._tree_selection()
+        if not sel or sel[0] != "server":
+            QMessageBox.information(
+                self,
+                "Duplicate",
+                "Select a server to duplicate.",
+            )
+            return
+        s = self._server_by_id(sel[1])
+        if not s:
+            return
+        dup = replace(
+            s,
+            id=new_server_id(),
+            name=f"{s.name} copy",
+        )
+        self.servers.append(dup)
+        save_servers(self.servers)
+        self._populate_tree()
 
     def _add_server(self) -> None:
         df = self._default_folder_id_for_new_server()
