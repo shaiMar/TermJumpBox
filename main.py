@@ -3,14 +3,16 @@
 
 from __future__ import annotations
 
+import ipaddress
 import shutil
 import subprocess
 import sys
+import webbrowser
 import uuid
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPoint, Qt, Signal
+from PySide6.QtCore import QByteArray, QObject, QPoint, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -68,6 +70,20 @@ from storage import (
 )
 
 _MAC_BUNDLE_ID = "sh.sshterm.manager"
+
+
+def _https_url_for_host(host: str) -> str:
+    """Build ``https://…`` for a host or bracketed IPv6 literal."""
+    h = (host or "").strip()
+    if not h:
+        return ""
+    if ":" in h and not h.startswith("["):
+        try:
+            ipaddress.IPv6Address(h)
+            return f"https://[{h}]"
+        except ValueError:
+            pass
+    return f"https://{h}"
 
 
 class ShowLauncherBridge(QObject):
@@ -633,8 +649,14 @@ class MainWindow(QMainWindow):
     def __init__(self, preferences: dict | None = None) -> None:
         super().__init__()
         self.setWindowTitle("SSH Term")
-        self.resize(780, 440)
+        self.setMinimumSize(300, 260)
         self._preferences = dict(preferences) if preferences is not None else load_preferences()
+        wg = (self._preferences.get("window_geometry_b64") or "").strip()
+        if wg:
+            if not self.restoreGeometry(QByteArray.fromBase64(wg.encode("ascii"))):
+                self.resize(460, 400)
+        else:
+            self.resize(460, 400)
         self.servers, self.keys, self.folders = load_app_state()
 
         central = QWidget()
@@ -648,17 +670,19 @@ class MainWindow(QMainWindow):
         top.addWidget(self._btn("Duplicate…", self._duplicate_server))
         top.addWidget(self._btn("Delete…", self._delete_selection))
         top.addWidget(self._btn("Connect", self._connect_selected))
+        top.addWidget(self._btn("Open https", self._open_https_selected))
         top.addSpacing(16)
         top.addWidget(self._btn("SSH keys…", self._open_keys))
         top.addStretch(1)
+        root.addLayout(top)
         hint = QLabel(
             "Double-click a server to open iTerm2. On Mac the app starts in the "
             "background; ⌘E shows this window. Closing the window hides it — ⌘E "
             "opens it again (enable Input Monitoring if macOS asks)."
         )
         hint.setStyleSheet("color: #aaa;")
-        top.addWidget(hint)
-        root.addLayout(top)
+        hint.setWordWrap(True)
+        root.addWidget(hint)
 
         if not shutil.which("osascript"):
             warn = QLabel("Warning: osascript not found — iTerm integration needs macOS.")
@@ -668,13 +692,23 @@ class MainWindow(QMainWindow):
         self._tree = ServerTreeWidget(self)
         self._tree.setColumnCount(3)
         self._tree.setHeaderLabels(["Name", "User @ Host", "Auth"])
-        self._tree.header().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self._tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self._tree.header().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.ResizeToContents
-        )
+        hdr = self._tree.header()
+        hdr.setMinimumSectionSize(36)
+        hdr.setStretchLastSection(False)
+        for col in (0, 1, 2):
+            hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+        tcw = self._preferences.get("tree_column_widths")
+        if (
+            isinstance(tcw, list)
+            and len(tcw) == 3
+            and all(isinstance(x, int) and x >= 36 for x in tcw)
+        ):
+            for i, w in enumerate(tcw):
+                hdr.resizeSection(i, w)
+        else:
+            hdr.resizeSection(0, 200)
+            hdr.resizeSection(1, 128)
+            hdr.resizeSection(2, 48)
         self._tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._tree.setDragEnabled(True)
         self._tree.setAcceptDrops(True)
@@ -694,8 +728,19 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Keep the app running: the window is only hidden (use ⌘E to show again)."""
+        self._persist_window_geometry()
         event.ignore()
         self.hide()
+
+    def _persist_window_geometry(self) -> None:
+        b64 = bytes(self.saveGeometry().toBase64()).decode("ascii")
+        hdr = self._tree.header()
+        widths = [max(hdr.minimumSectionSize(), hdr.sectionSize(i)) for i in range(3)]
+        self._preferences["window_geometry_b64"] = b64
+        self._preferences["tree_column_widths"] = widths
+        save_preferences(
+            {"window_geometry_b64": b64, "tree_column_widths": widths},
+        )
 
     def _setup_view_menu(self) -> None:
         view = self.menuBar().addMenu("View")
@@ -803,6 +848,8 @@ class MainWindow(QMainWindow):
             add_keys()
         else:
             menu.addAction("Connect", self._connect_selected)
+            menu.addAction("Open https", self._open_https_selected)
+            menu.addAction("Copy IP to clipboard", self._copy_server_ip_selected)
             menu.addSeparator()
             menu.addAction("Edit server…", self._edit_selection)
             menu.addAction("Duplicate…", self._duplicate_server)
@@ -1084,6 +1131,38 @@ class MainWindow(QMainWindow):
                 "password when ssh prompts.",
             )
 
+    def _open_https_selected(self) -> None:
+        sel = self._tree_selection()
+        if not sel or sel[0] != "server":
+            QMessageBox.information(self, "Open https", "Select a server row first.")
+            return
+        s = self._server_by_id(sel[1])
+        if not s:
+            return
+        url = _https_url_for_host(s.host)
+        if not url:
+            QMessageBox.warning(self, "Open https", "This server has no host.")
+            return
+        webbrowser.open(url)
+
+    def _copy_server_ip_selected(self) -> None:
+        sel = self._tree_selection()
+        if not sel or sel[0] != "server":
+            QMessageBox.information(
+                self,
+                "Copy IP",
+                "Select a server row first.",
+            )
+            return
+        s = self._server_by_id(sel[1])
+        if not s:
+            return
+        h = (s.host or "").strip()
+        if not h:
+            QMessageBox.warning(self, "Copy IP", "This server has no host.")
+            return
+        QApplication.clipboard().setText(h)
+
 
 def _bundle_root() -> Path:
     """Directory containing bundled `assets/` (dev repo root or PyInstaller layout)."""
@@ -1159,6 +1238,7 @@ def main() -> None:
     if sys.platform != "darwin" or not hotkey_ok:
         w.show()
     install_dock_click_show_window(w, app)
+    app.aboutToQuit.connect(w._persist_window_geometry)
     raise SystemExit(app.exec())
 
 

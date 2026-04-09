@@ -148,8 +148,12 @@ def _migrate_server_dict(d: dict, keys: list[KeyEntry]) -> tuple[dict, bool]:
 
 
 def load_preferences() -> dict:
-    """App UI prefs; keys include ``hide_dock_icon`` (bool, macOS Dock)."""
-    defaults: dict = {"hide_dock_icon": False}
+    """App UI prefs; keys include ``hide_dock_icon``, ``window_geometry_b64``, ``tree_column_widths``."""
+    defaults: dict = {
+        "hide_dock_icon": False,
+        "window_geometry_b64": "",
+        "tree_column_widths": None,
+    }
     ensure_config()
     if not PREFERENCES_FILE.is_file():
         return dict(defaults)
@@ -161,6 +165,17 @@ def load_preferences() -> dict:
         return dict(defaults)
     out = dict(defaults)
     out["hide_dock_icon"] = bool(raw.get("hide_dock_icon", False))
+    wg = raw.get("window_geometry_b64")
+    out["window_geometry_b64"] = wg if isinstance(wg, str) else ""
+    tcw = raw.get("tree_column_widths")
+    if (
+        isinstance(tcw, list)
+        and len(tcw) == 3
+        and all(isinstance(x, int) and x >= 36 for x in tcw)
+    ):
+        out["tree_column_widths"] = tcw
+    else:
+        out["tree_column_widths"] = None
     return out
 
 

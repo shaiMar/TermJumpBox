@@ -1,6 +1,6 @@
 # SSH Term
 
-Small macOS-friendly desktop app to keep a list of SSH servers, shared private key entries, and optional password auth. Organize entries in **folders and subfolders** in the sidebar tree. Double-click a server (or press Enter) to open a new **iTerm2** tab and run `ssh` with the right user, port, key, or password helper. The tab title is set to the **server name** (as shown in the app).
+Small macOS-friendly desktop app to keep a list of SSH servers, shared private key entries, and optional password auth. Organize entries in **folders and subfolders** in the sidebar tree. Double-click a server (or press Enter) to open a new **iTerm2** tab and run `ssh` with the right user, port, key, or password helper. **Open https** (toolbar or server context menu) opens the default browser at **`https://`** plus the same **host** you use for SSH (IPv6 addresses are bracketed automatically). The tab title is set to the **server name** (as shown in the app).
 
 ## Requirements
 
@@ -62,7 +62,7 @@ Configuration lives under **`~/.config/ssh-term/`**:
 | `servers.json` | Server entries (host, user, port, auth type, key id, folder id, obfuscated password if used) |
 | `keys.json`    | Named SSH private key paths (many servers can share one key id) |
 | `folders.json` | Folder tree (`name`, `parent_id`; empty parent means top level) |
-| `preferences.json` | UI prefs (e.g. `hide_dock_icon` for macOS “no Dock tile”) |
+| `preferences.json` | UI prefs (`hide_dock_icon`, `window_geometry_b64`, `tree_column_widths`) |
 | `launch.log` | Output from **`./launch.sh`** when not using `SSH_TERM_FG=1` |
 
 Use **Add folder…** / **Add server…** with a row selected to create a subfolder or server inside that folder (or choose **Folder** in the server dialog). A folder must be empty (no servers, no subfolders) before you delete it.
