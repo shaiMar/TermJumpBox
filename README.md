@@ -8,6 +8,7 @@ Small macOS-friendly desktop app to keep a list of SSH servers, shared private k
 - **Python 3.10+**
 - **[iTerm2](https://iterm2.com/)** installed
 - **PySide6** (Qt) for the UI — see `requirements.txt`
+- **pynput** (installed automatically on macOS) for the global **⌘D** shortcut
 
 ## Quick start
 
@@ -52,13 +53,27 @@ The app uses Qt’s **Fusion** style with a built-in **dark palette** (no extra 
 
 The first time you connect, macOS may ask to allow **Automation** so the app (or the terminal you launched it from) can control **iTerm2**.
 
+**Global ⌘D**: macOS may prompt for **Input Monitoring** (or **Accessibility** on older versions). Enable it for **SSH Term** (or **Python** / **Terminal** when running from source) under **System Settings → Privacy & Security**. Other apps that use ⌘D may override this shortcut depending on focus.
+
+## macOS .pkg installer
+
+From a clone of this repo on a Mac:
+
+```bash
+./scripts/build-macos-pkg.sh 0.1.0
+```
+
+This creates **`dist/SSH Term.app`** and **`dist/SSH-Term-0.1.0.pkg`**. The package installs the app into **`/Applications`**. It is **not** code-signed or notarized; users may need to **right-click → Open** the app or installer the first time. For distribution outside the App Store, use your own Apple Developer ID signing and notarization workflow.
+
 ## Project layout
 
 - `assets/app_icon.png` — window / app icon (replace to customize)
 - `main.py` — Qt UI
+- `global_hotkey.py` — optional system-wide ⌘D (macOS / pynput)
 - `storage.py` — JSON load/save, password encode/decode
 - `iterm_ssh.py` — builds the `ssh` command and runs AppleScript against iTerm2
 - `launch.sh` — runs `main.py` with the local venv if present
+- `scripts/build-macos-pkg.sh` — PyInstaller + `pkgbuild` for `.app` / `.pkg`
 
 ## License
 

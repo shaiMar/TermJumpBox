@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 import sys
 import uuid
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QObject, QPoint, Qt, Signal
 from PySide6.QtGui import QColor, QDropEvent, QIcon, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -39,6 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 import iterm_ssh
+from global_hotkey import start_global_hotkey_macos
 from storage import (
     Folder,
     KeyEntry,
@@ -51,6 +53,12 @@ from storage import (
     save_servers,
     servers_using_key,
 )
+
+_MAC_BUNDLE_ID = "sh.sshterm.manager"
+
+
+class ShowLauncherBridge(QObject):
+    show_requested = Signal()
 
 
 def _folder_combo_rows(
@@ -629,7 +637,10 @@ class MainWindow(QMainWindow):
         top.addSpacing(16)
         top.addWidget(self._btn("SSH keys…", self._open_keys))
         top.addStretch(1)
-        hint = QLabel("Double-click a server to open iTerm2 and connect.")
+        hint = QLabel(
+            "Double-click a server to open iTerm2. On Mac, ⌘D shows this window "
+            "system-wide (enable Input Monitoring for this app if macOS asks)."
+        )
         hint.setStyleSheet("color: #aaa;")
         top.addWidget(hint)
         root.addLayout(top)
@@ -663,6 +674,27 @@ class MainWindow(QMainWindow):
         root.addWidget(self._tree, 1)
 
         self._populate_tree()
+
+    def bring_to_front(self) -> None:
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        if sys.platform == "darwin" and getattr(sys, "frozen", False):
+            try:
+                subprocess.run(
+                    [
+                        "osascript",
+                        "-e",
+                        f'tell application id "{_MAC_BUNDLE_ID}" to activate',
+                    ],
+                    capture_output=True,
+                    timeout=3,
+                    check=False,
+                )
+            except (subprocess.SubprocessError, OSError):
+                pass
 
     @staticmethod
     def _btn(text: str, slot) -> QPushButton:
@@ -990,8 +1022,25 @@ class MainWindow(QMainWindow):
             )
 
 
+def _bundle_root() -> Path:
+    """Directory containing bundled `assets/` (dev repo root or PyInstaller layout)."""
+    if not getattr(sys, "frozen", False):
+        return Path(__file__).resolve().parent
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        p = Path(meipass)
+        if (p / "assets").is_dir():
+            return p
+    exe = Path(sys.executable).resolve()
+    if exe.parent.name == "MacOS":
+        resources = exe.parent.parent / "Resources"
+        if (resources / "assets").is_dir():
+            return resources
+    return Path(meipass) if meipass else exe.parent
+
+
 def _application_icon() -> QIcon:
-    path = Path(__file__).resolve().parent / "assets" / "app_icon.png"
+    path = _bundle_root() / "assets" / "app_icon.png"
     if path.is_file():
         return QIcon(str(path))
     return QIcon()
@@ -1026,6 +1075,19 @@ def main() -> None:
     w = MainWindow()
     if not icon.isNull():
         w.setWindowIcon(icon)
+    bridge = ShowLauncherBridge(w)
+    bridge.show_requested.connect(
+        w.bring_to_front,
+        Qt.ConnectionType.QueuedConnection,
+    )
+    if sys.platform == "darwin":
+        if not start_global_hotkey_macos(bridge):
+            print(
+                "SSH Term: global ⌘D needs pynput (pip install pynput). "
+                "After installing, allow Input Monitoring for this app in "
+                "System Settings → Privacy & Security.",
+                file=sys.stderr,
+            )
     w.show()
     raise SystemExit(app.exec())
 
