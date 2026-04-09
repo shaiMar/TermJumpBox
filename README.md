@@ -35,6 +35,8 @@ Use **Add folder…** / **Add server…** with a row selected to create a subfol
 
 **Right-click** the tree for the same actions in a context menu: on empty space you get **New folder** and **Add server** at the root (plus **SSH keys…**). On a folder or server row you get connect / edit / duplicate / delete and folder creation options appropriate to that row.
 
+**Drag and drop**: drag a **server** onto a **folder** to move it into that folder; onto another **server** to share that server’s folder; onto **empty tree space** to move it to the **root**. Folders are not draggable.
+
 Passwords are stored with a **fixed in-app obfuscation** (XOR + base64, prefix `enc1:`). That is not strong encryption; anyone with this repo can decode them. It only reduces casual exposure in the JSON file.
 
 ## SSH keys vs passwords

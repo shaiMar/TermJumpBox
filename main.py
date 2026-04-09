@@ -9,7 +9,7 @@ import uuid
 from dataclasses import replace
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QColor, QKeySequence, QPalette, QShortcut
+from PySide6.QtGui import QColor, QDropEvent, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -563,6 +563,48 @@ class KeysManagerDialog(QDialog):
         self._refresh()
 
 
+class ServerTreeWidget(QTreeWidget):
+    """Tree with internal drag-and-drop to reparent servers into folders."""
+
+    def __init__(self, main: "MainWindow"):
+        super().__init__()
+        self._main = main
+        self._drag_sources: list[QTreeWidgetItem] = []
+
+    def startDrag(self, supportedActions: Qt.DropAction) -> None:
+        self._drag_sources = list(self.selectedItems())
+        super().startDrag(supportedActions)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        if event.source() is not self:
+            super().dropEvent(event)
+            return
+        sources = self._drag_sources
+        self._drag_sources = []
+        if not sources:
+            event.ignore()
+            return
+        pt = event.position().toPoint()
+        target = self.itemAt(pt)
+        new_fid = self._main._folder_id_for_tree_drop(target)
+        changed = False
+        for src in sources:
+            d = src.data(0, MainWindow._TREE_ROLE)
+            if not d or d[0] != "server":
+                continue
+            sid = d[1]
+            for i, srv in enumerate(self._main.servers):
+                if srv.id == sid:
+                    if srv.folder_id != new_fid:
+                        self._main.servers[i] = replace(srv, folder_id=new_fid)
+                        changed = True
+                    break
+        if changed:
+            save_servers(self._main.servers)
+            self._main._populate_tree()
+        event.acceptProposedAction()
+
+
 class MainWindow(QMainWindow):
     _TREE_ROLE = Qt.ItemDataRole.UserRole
 
@@ -596,7 +638,7 @@ class MainWindow(QMainWindow):
             warn.setStyleSheet("color: #a30;")
             root.addWidget(warn)
 
-        self._tree = QTreeWidget()
+        self._tree = ServerTreeWidget(self)
         self._tree.setColumnCount(3)
         self._tree.setHeaderLabels(["Name", "User @ Host", "Auth"])
         self._tree.header().setSectionResizeMode(
@@ -607,6 +649,11 @@ class MainWindow(QMainWindow):
             2, QHeaderView.ResizeMode.ResizeToContents
         )
         self._tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._tree.setDragEnabled(True)
+        self._tree.setAcceptDrops(True)
+        self._tree.setDropIndicatorShown(True)
+        self._tree.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self._tree.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._tree_context_menu)
         self._tree.itemDoubleClicked.connect(self._on_tree_double_click)
@@ -723,6 +770,10 @@ class MainWindow(QMainWindow):
                 fi.setText(1, "")
                 fi.setText(2, "Folder")
                 fi.setData(0, MainWindow._TREE_ROLE, ("folder", f.id))
+                fi.setFlags(
+                    (fi.flags() | Qt.ItemFlag.ItemIsDropEnabled)
+                    & ~Qt.ItemFlag.ItemIsDragEnabled
+                )
                 add_under(fi, f.id)
             for s in sorted(
                 [x for x in self.servers if x.folder_id == parent_folder_id],
@@ -734,6 +785,11 @@ class MainWindow(QMainWindow):
                 si.setText(1, f"{s.username}@{s.display_host()}")
                 si.setText(2, auth_label)
                 si.setData(0, MainWindow._TREE_ROLE, ("server", s.id))
+                si.setFlags(
+                    si.flags()
+                    | Qt.ItemFlag.ItemIsDragEnabled
+                    | Qt.ItemFlag.ItemIsDropEnabled
+                )
 
         add_under(self._tree.invisibleRootItem(), "")
         self._tree.expandAll()
@@ -743,6 +799,21 @@ class MainWindow(QMainWindow):
 
     def _folder_by_id(self, fid: str) -> Folder | None:
         return next((f for f in self.folders if f.id == fid), None)
+
+    def _folder_id_for_tree_drop(self, target: QTreeWidgetItem | None) -> str:
+        """Resolve target folder id when dropping a server onto the tree."""
+        if target is None:
+            return ""
+        d = target.data(0, MainWindow._TREE_ROLE)
+        if not d or not isinstance(d, (list, tuple)) or len(d) != 2:
+            return ""
+        kind, iid = d[0], d[1]
+        if kind == "folder":
+            return iid
+        if kind == "server":
+            s = self._server_by_id(iid)
+            return s.folder_id if s else ""
+        return ""
 
     def _duplicate_server(self) -> None:
         sel = self._tree_selection()
