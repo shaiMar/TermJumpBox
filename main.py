@@ -8,7 +8,7 @@ import sys
 import uuid
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -584,7 +584,7 @@ class MainWindow(QMainWindow):
         top.addWidget(self._btn("SSH keys…", self._open_keys))
         top.addStretch(1)
         hint = QLabel("Double-click a server to open iTerm2 and connect.")
-        hint.setStyleSheet("color: palette(mid);")
+        hint.setStyleSheet("color: #aaa;")
         top.addWidget(hint)
         root.addLayout(top)
 
@@ -835,8 +835,29 @@ class MainWindow(QMainWindow):
             )
 
 
+def apply_dark_theme(app: QApplication) -> None:
+    app.setStyle("Fusion")
+    p = QPalette()
+    p.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
+    p.setColor(QPalette.ColorRole.WindowText, Qt.GlobalColor.white)
+    p.setColor(QPalette.ColorRole.Base, QColor(35, 35, 35))
+    p.setColor(QPalette.ColorRole.AlternateBase, QColor(66, 66, 66))
+    p.setColor(QPalette.ColorRole.ToolTipBase, QColor(35, 35, 35))
+    p.setColor(QPalette.ColorRole.ToolTipText, Qt.GlobalColor.white)
+    p.setColor(QPalette.ColorRole.Text, Qt.GlobalColor.white)
+    p.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))
+    p.setColor(QPalette.ColorRole.ButtonText, Qt.GlobalColor.white)
+    p.setColor(QPalette.ColorRole.BrightText, Qt.GlobalColor.red)
+    p.setColor(QPalette.ColorRole.Link, QColor(66, 156, 255))
+    p.setColor(QPalette.ColorRole.Highlight, QColor(72, 118, 184))
+    p.setColor(QPalette.ColorRole.HighlightedText, Qt.GlobalColor.white)
+    p.setColor(QPalette.ColorRole.PlaceholderText, QColor(200, 200, 200))
+    app.setPalette(p)
+
+
 def main() -> None:
     app = QApplication(sys.argv)
+    apply_dark_theme(app)
     w = MainWindow()
     w.show()
     raise SystemExit(app.exec())

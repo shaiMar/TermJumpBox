@@ -40,6 +40,10 @@ Passwords are stored with a **fixed in-app obfuscation** (XOR + base64, prefix `
 - **Key auth**: pick a key from the shared list or add one (label + path to private key). The app runs `ssh -i … -o IdentitiesOnly=yes`.
 - **Password auth**: stored obfuscated in `servers.json`. For non-interactive login, **`sshpass`** must be installed (for example `brew install hudochenkov/sshpass/sshpass`). Otherwise iTerm opens plain `ssh user@host` and you type the password when prompted.
 
+## Dark theme
+
+The app uses Qt’s **Fusion** style with a built-in **dark palette** (no extra packages).
+
 ## Permissions
 
 The first time you connect, macOS may ask to allow **Automation** so the app (or the terminal you launched it from) can control **iTerm2**.
